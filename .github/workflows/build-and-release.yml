@@ -10,7 +10,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     container:
-      image: cimg/android:2024.10
+      image: cimg/android:2023.08
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -18,23 +18,61 @@ jobs:
       - name: Build with Gradle
         run: ./gradlew assembleDebug
 
-      - name: Create Release
-        id: create_release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Check if release exists
+        id: check_release
+        uses: actions/github-script@v6
         with:
-          tag_name: ${{ github.ref }}
-          release_name: Debug Release ${{ github.ref }}
-          draft: false
-          prerelease: true
+          github-token: ${{secrets.GITHUB_TOKEN}}
+          script: |
+            try {
+              const release = await github.rest.repos.getReleaseByTag({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                tag: context.ref.replace('refs/tags/', '')
+              });
+              return release.data.id;
+            } catch (e) {
+              return '';
+            }
 
-      - name: Upload Debug APK
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Update releases
+        id: create_release
+        uses: actions/github-script@v6
         with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: app/build/outputs/apk/debug/app-debug.apk
-          asset_name: KotatsuDev-debug-${{ github.ref_name }}.apk
-          asset_content_type: application/vnd.android.package-archive
+          github-token: ${{secrets.GITHUB_TOKEN}}
+          script: |
+            const fs = require('fs');
+            const releaseId = '${{ steps.check_release.outputs.result }}';
+            const tag = context.ref.replace('refs/tags/', '');
+            const releaseData = {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: tag,
+              name: `Debug Release ${tag}`,
+              body: 'This is an automated debug release',
+              draft: false,
+              prerelease: true
+            };
+            
+            let release;
+            if (releaseId) {
+              release = await github.rest.repos.updateRelease({
+                ...releaseData,
+                release_id: releaseId
+              });
+            } else {
+              release = await github.rest.repos.createRelease(releaseData);
+            }
+            
+            const asset = await github.rest.repos.uploadReleaseAsset({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: release.data.id,
+              name: `KotatsuDev-debug-${tag}.apk`,
+              data: fs.readFileSync('app/build/outputs/apk/debug/app-debug.apk')
+            });
+            
+            return release.data.upload_url;
+
+      - name: Output Release URL
+        run: echo "${{ steps.create_release.outputs.result }}"
