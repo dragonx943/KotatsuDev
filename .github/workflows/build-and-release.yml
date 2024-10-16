@@ -1,18 +1,18 @@
-name: Build and Release Debug APK
+name: Build and Release
 
 on:
   workflow_dispatch:
     inputs:
       tag_name:
-        description: '7.7-a2'
+        description: 'Tag ?'
         required: true
       release_name:
-        description: 'Kotatsu Dev (Debug) v7.7-a2'
-        required: false
+        description: 'Name ?'
+        required: true
       is_prerelease:
         description: 'Is this a pre-release?'
         type: boolean
-        default: false
+        default: true
 
 jobs:
   build:
@@ -37,7 +37,7 @@ jobs:
           draft: false
           prerelease: ${{ github.event.inputs.is_prerelease }}
 
-      - name: Upload releases
+      - name: Upload Debug APK
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
