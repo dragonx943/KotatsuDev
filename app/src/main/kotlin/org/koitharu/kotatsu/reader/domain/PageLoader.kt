@@ -1,10 +1,10 @@
 package org.koitharu.kotatsu.reader.domain
 
+import android.content.ContentResolver.MimeTypeInfo
 import android.content.Context
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.graphics.Rect
 import android.net.Uri
+import android.webkit.MimeTypeMap
 import androidx.annotation.AnyThread
 import androidx.collection.LongSparseArray
 import androidx.collection.set
@@ -56,8 +56,11 @@ import org.koitharu.kotatsu.local.data.isFileUri
 import org.koitharu.kotatsu.local.data.isZipUri
 import org.koitharu.kotatsu.parsers.model.MangaPage
 import org.koitharu.kotatsu.parsers.model.MangaSource
+import org.koitharu.kotatsu.parsers.util.mimeType
 import org.koitharu.kotatsu.parsers.util.requireBody
 import org.koitharu.kotatsu.parsers.util.runCatchingCancellable
+import org.koitharu.kotatsu.core.image.BitmapDecoderCompat
+import org.koitharu.kotatsu.core.util.ext.mimeType
 import org.koitharu.kotatsu.reader.ui.pager.ReaderPage
 import java.util.LinkedList
 import java.util.concurrent.atomic.AtomicInteger
@@ -141,17 +144,17 @@ class PageLoader @Inject constructor(
 				ZipFile(uri.schemeSpecificPart).use { zip ->
 					val entry = zip.getEntry(uri.fragment)
 					context.ensureRamAtLeast(entry.size * 2)
-					zip.getInputStream(zip.getEntry(uri.fragment)).use {
-						checkBitmapNotNull(BitmapFactory.decodeStream(it))
+					zip.getInputStream(entry).use {
+						BitmapDecoderCompat.decode(it, entry.mimeType)
 					}
 				}
 			}
 			cache.put(uri.toString(), bitmap).toUri()
 		} else {
 			val file = uri.toFile()
-			context.ensureRamAtLeast(file.length() * 2)
 			runInterruptible(Dispatchers.IO) {
-				checkBitmapNotNull(BitmapFactory.decodeFile(file.absolutePath))
+				context.ensureRamAtLeast(file.length() * 2)
+				BitmapDecoderCompat.decode(file)
 			}.use { image ->
 				image.compressToPNG(file)
 			}
@@ -235,7 +238,7 @@ class PageLoader @Inject constructor(
 				val request = createPageRequest(pageUrl, page.source)
 				imageProxyInterceptor.interceptPageRequest(request, okHttp).ensureSuccess().use { response ->
 					response.requireBody().withProgress(progress).use {
-						cache.put(pageUrl, it.source())
+						cache.put(pageUrl, it.source(), response.mimeType)
 					}
 				}.toUri()
 			}
@@ -245,8 +248,6 @@ class PageLoader @Inject constructor(
 	private fun isLowRam(): Boolean {
 		return context.ramAvailable <= FileSize.MEGABYTES.convert(PREFETCH_MIN_RAM_MB, FileSize.BYTES)
 	}
-
-	private fun checkBitmapNotNull(bitmap: Bitmap?): Bitmap = checkNotNull(bitmap) { "Cannot decode bitmap" }
 
 	private fun Deferred<Uri>.isValid(): Boolean {
 		return getCompletionResultOrNull()?.map { uri ->
